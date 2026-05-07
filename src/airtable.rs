@@ -44,6 +44,12 @@ impl AirtableClient {
         table_id: &str,
         add_params: Option<&[(&str, &str)]>,
     ) -> Result<Vec<Record<T>>> {
+        #[derive(Debug, Clone, Deserialize)]
+        struct ListRecordsResponse<T> {
+            records: Vec<Record<T>>,
+            offset: Option<String>,
+        }
+
         let mut all_records = vec![];
         let mut offset: Option<String> = None;
 
@@ -96,6 +102,16 @@ impl AirtableClient {
         T: Serialize + DeserializeOwned + 'a,
         I: IntoIterator<Item = &'a ExistingRecord<T>>,
     {
+        #[derive(Debug, Clone, Serialize)]
+        struct UpdateRecordsRequest<'a, T> {
+            records: Vec<&'a ExistingRecord<T>>,
+        }
+
+        #[derive(Debug, Clone, Deserialize)]
+        struct UpdateRecordsResponse<T> {
+            records: Vec<Record<T>>,
+        }
+
         let records: Vec<_> = records.into_iter().collect();
         let mut returned_records = vec![];
         for chunk in records.chunks(10) {
@@ -123,6 +139,16 @@ impl AirtableClient {
         T: Serialize + DeserializeOwned + 'a,
         I: IntoIterator<Item = &'a T>,
     {
+        #[derive(Debug, Clone, Serialize)]
+        struct CreateRecordsRequest<'a, T> {
+            records: Vec<NewRecord<&'a T>>,
+        }
+
+        #[derive(Debug, Clone, Deserialize)]
+        struct CreateRecordsResponse<T> {
+            records: Vec<Record<T>>,
+        }
+
         let new_records: Vec<_> = new_records.into_iter().collect();
         let mut returned_records = vec![];
         for chunk in new_records.chunks(10) {
@@ -226,32 +252,6 @@ pub struct ExistingRecord<T> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct NewRecord<T> {
     pub fields: T,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct ListRecordsResponse<T> {
-    records: Vec<Record<T>>,
-    offset: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct UpdateRecordsRequest<'a, T> {
-    records: Vec<&'a ExistingRecord<T>>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct UpdateRecordsResponse<T> {
-    records: Vec<Record<T>>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct CreateRecordsRequest<'a, T> {
-    records: Vec<NewRecord<&'a T>>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct CreateRecordsResponse<T> {
-    records: Vec<Record<T>>,
 }
 
 async fn response_result_with_error_body(response: Response) -> Result<Response> {
