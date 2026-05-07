@@ -1,12 +1,10 @@
-use std::{fmt::Debug, num::NonZero, sync::Arc};
-
-use anyhow::{Context, Ok, Result, anyhow};
-use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
-use reqwest::{Client, Method, Response, Url};
+use reqwest::{Method, StatusCode};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use thiserror::Error;
 
-const MAX_REQUESTS_PER_SECOND: u32 = 5;
-const API_BASE_URL: &str = "https://api.airtable.com/v0";
+use crate::airtable::client::HttpClient;
+
+mod client;
 
 #[derive(Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -23,24 +21,41 @@ pub struct ExistingRecord<F> {
     pub fields: F,
 }
 
+#[derive(Error, Debug)]
+pub enum AirtableError {
+    #[error("can't deserialize successful Airtable response (likely fields object is misformed)")]
+    DeserializeSuccessResponse { response: String },
+
+    #[error("error from Airtable api ({status}): {response}")]
+    Airtable {
+        status: StatusCode,
+        response: String,
+    },
+
+    #[error("url parsing error: {source}")]
+    ParseUrl {
+        #[from]
+        source: url::ParseError,
+    },
+
+    #[error("http error: {source}")]
+    Http {
+        #[from]
+        source: reqwest::Error,
+    },
+}
+
+type Result<T> = std::result::Result<T, AirtableError>;
+
 #[derive(Clone)]
 pub struct AirtableClient {
-    airtable_pat: String,
-    base_url: String,
-    client: Client,
-    rate_limiter: Arc<DefaultDirectRateLimiter>,
+    http_client: HttpClient,
 }
 
 impl AirtableClient {
-    pub fn new(airtable_pat: String, base_id: String) -> Self {
+    pub fn new(base_id: String, airtable_pat: String) -> Self {
         Self {
-            airtable_pat,
-            base_url: format!("{API_BASE_URL}/{base_id}"),
-            client: Client::new(),
-            rate_limiter: Arc::new(RateLimiter::direct(Quota::per_second(
-                NonZero::new(MAX_REQUESTS_PER_SECOND)
-                    .expect("MAX_REQUESTS_PER_SECOND should not be zero"),
-            ))),
+            http_client: HttpClient::new(base_id, airtable_pat),
         }
     }
 
@@ -49,16 +64,12 @@ impl AirtableClient {
         table_id: &str,
         id: &str,
     ) -> Result<Record<F>> {
-        self.get(&format!("/{table_id}/{id}"), None)
+        self.http_client
+            .get(&format!("/{table_id}/{id}"), None)
             .await
-            .context("Failed to get record")
     }
 
-    pub async fn get_records<F: DeserializeOwned>(
-        &self,
-        table_id: &str,
-        add_params: Option<&[(&str, &str)]>,
-    ) -> Result<Vec<Record<F>>> {
+    pub async fn get_records<F: DeserializeOwned>(&self, table_id: &str) -> Result<Vec<Record<F>>> {
         #[derive(Debug, Clone, Deserialize)]
         struct ListRecordsResponse<F> {
             records: Vec<Record<F>>,
@@ -69,22 +80,16 @@ impl AirtableClient {
         let mut offset: Option<String> = None;
 
         loop {
-            let params = {
-                let mut params = add_params.map(|params| params.to_owned());
-
-                if let Some(params) = &mut params
-                    && let Some(offset) = &offset
-                {
-                    params.push(("offset", offset));
-                }
-
-                params
+            let params = if let Some(offset) = offset.as_deref() {
+                vec![("offset", offset)]
+            } else {
+                vec![]
             };
 
             let response = self
-                .get::<ListRecordsResponse<F>>(&format!("/{table_id}"), params.as_deref())
-                .await
-                .context("Failed to get records")?;
+                .http_client
+                .get::<ListRecordsResponse<F>>(&format!("/{table_id}"), Some(params))
+                .await?;
 
             all_records.extend(response.records);
 
@@ -103,9 +108,19 @@ impl AirtableClient {
         record_id: &str,
         fields: &F,
     ) -> Result<Record<F>> {
-        self.patch::<_, Record<F>>(&format!("/{table_id}/{record_id}"), &NewRecord { fields })
+        #[derive(Serialize, Deserialize, Clone, Debug)]
+        struct UpdatedRecord<F> {
+            pub fields: F,
+        }
+
+        self.http_client
+            .request::<_, Record<F>>(
+                &format!("/{table_id}/{record_id}"),
+                None,
+                Some(&UpdatedRecord { fields }),
+                Method::PATCH,
+            )
             .await
-            .context("Failed to update record")
     }
 
     pub async fn update_records<'a, F, I>(
@@ -135,9 +150,14 @@ impl AirtableClient {
             };
 
             let response = self
-                .patch::<_, UpdateRecordsResponse<F>>(&format!("/{table_id}"), &body)
-                .await
-                .context("Failed to update records")?;
+                .http_client
+                .request::<_, UpdateRecordsResponse<F>>(
+                    &format!("/{table_id}"),
+                    None,
+                    Some(&body),
+                    Method::PATCH,
+                )
+                .await?;
 
             returned_records.extend(response.records);
         }
@@ -159,6 +179,11 @@ impl AirtableClient {
             records: Vec<NewRecord<&'a F>>,
         }
 
+        #[derive(Serialize, Deserialize, Clone, Debug)]
+        struct NewRecord<F> {
+            pub fields: F,
+        }
+
         #[derive(Clone, Deserialize, Debug)]
         struct CreateRecordsResponse<F> {
             records: Vec<Record<F>>,
@@ -175,95 +200,18 @@ impl AirtableClient {
             };
 
             let response = self
-                .post::<_, CreateRecordsResponse<F>>(&format!("/{table_id}"), &body)
+                .http_client
+                .request::<_, CreateRecordsResponse<F>>(
+                    &format!("/{table_id}"),
+                    None,
+                    Some(&body),
+                    Method::POST,
+                )
                 .await?;
 
             returned_records.extend(response.records);
         }
 
         Ok(returned_records)
-    }
-
-    async fn get<F: DeserializeOwned>(
-        &self,
-        endpoint: &str,
-        params: Option<&[(&str, &str)]>,
-    ) -> Result<F> {
-        self.rate_limiter.until_ready().await;
-
-        let base_url = &format!("{}{}", self.base_url, endpoint);
-
-        let url = match params {
-            Some(params) => Url::parse_with_params(base_url, params)?,
-            None => Url::parse(base_url)?,
-        };
-
-        let response = self
-            .client
-            .get(url)
-            .bearer_auth(self.airtable_pat.clone())
-            .send()
-            .await?;
-
-        Ok(response_result_with_error_body(response)
-            .await?
-            .json()
-            .await?)
-    }
-
-    async fn post<Req: Serialize, Res: DeserializeOwned>(
-        &self,
-        endpoint: &str,
-        body: &Req,
-    ) -> Result<Res> {
-        self.write_method(endpoint, body, Method::POST).await
-    }
-
-    async fn patch<Req: Serialize, Res: DeserializeOwned>(
-        &self,
-        endpoint: &str,
-        body: &Req,
-    ) -> Result<Res> {
-        self.write_method(endpoint, body, Method::PATCH).await
-    }
-
-    async fn write_method<Req: Serialize, Res: DeserializeOwned>(
-        &self,
-        endpoint: &str,
-        body: &Req,
-        method: Method,
-    ) -> Result<Res> {
-        self.rate_limiter.until_ready().await;
-
-        let response = self
-            .client
-            .request(method, format!("{}{}", self.base_url, endpoint))
-            .bearer_auth(self.airtable_pat.clone())
-            .json(body)
-            .send()
-            .await?;
-
-        Ok(response_result_with_error_body(response)
-            .await?
-            .json()
-            .await?)
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-struct NewRecord<F> {
-    pub fields: F,
-}
-
-async fn response_result_with_error_body(response: Response) -> Result<Response> {
-    if !(response.status().is_client_error() || response.status().is_server_error()) {
-        Ok(response)
-    } else {
-        let status = response.status();
-        let error_body = response.text().await?;
-
-        Err(anyhow!(
-            "Airtable API error ({status}) with body: {error_body}"
-        ))
     }
 }
