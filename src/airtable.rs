@@ -1,4 +1,4 @@
-use std::{num::NonZero, sync::Arc};
+use std::{fmt::Debug, num::NonZero, sync::Arc};
 
 use anyhow::{Context, Ok, Result, anyhow};
 use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
@@ -7,6 +7,21 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 const MAX_REQUESTS_PER_SECOND: u32 = 5;
 const API_BASE_URL: &str = "https://api.airtable.com/v0";
+
+#[derive(Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Record<F> {
+    pub id: String,
+    pub created_time: String,
+    pub fields: F,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ExistingRecord<F> {
+    pub id: String,
+    pub fields: F,
+}
 
 #[derive(Clone)]
 pub struct AirtableClient {
@@ -29,24 +44,24 @@ impl AirtableClient {
         }
     }
 
-    pub async fn get_record<T: DeserializeOwned>(
+    pub async fn get_record<F: DeserializeOwned>(
         &self,
         table_id: &str,
         id: &str,
-    ) -> Result<Record<T>> {
+    ) -> Result<Record<F>> {
         self.get(&format!("/{table_id}/{id}"), None)
             .await
             .context("Failed to get record")
     }
 
-    pub async fn get_records<T: DeserializeOwned>(
+    pub async fn get_records<F: DeserializeOwned>(
         &self,
         table_id: &str,
         add_params: Option<&[(&str, &str)]>,
-    ) -> Result<Vec<Record<T>>> {
+    ) -> Result<Vec<Record<F>>> {
         #[derive(Debug, Clone, Deserialize)]
-        struct ListRecordsResponse<T> {
-            records: Vec<Record<T>>,
+        struct ListRecordsResponse<F> {
+            records: Vec<Record<F>>,
             offset: Option<String>,
         }
 
@@ -67,7 +82,7 @@ impl AirtableClient {
             };
 
             let response = self
-                .get::<ListRecordsResponse<T>>(&format!("/{table_id}"), params.as_deref())
+                .get::<ListRecordsResponse<F>>(&format!("/{table_id}"), params.as_deref())
                 .await
                 .context("Failed to get records")?;
 
@@ -82,34 +97,34 @@ impl AirtableClient {
         Ok(all_records)
     }
 
-    pub async fn update_record<T: Serialize + DeserializeOwned>(
+    pub async fn update_record<F: Serialize + DeserializeOwned>(
         &self,
         table_id: &str,
         record_id: &str,
-        fields: &T,
-    ) -> Result<Record<T>> {
-        self.patch::<_, Record<T>>(&format!("/{table_id}/{record_id}"), &NewRecord { fields })
+        fields: &F,
+    ) -> Result<Record<F>> {
+        self.patch::<_, Record<F>>(&format!("/{table_id}/{record_id}"), &NewRecord { fields })
             .await
             .context("Failed to update record")
     }
 
-    pub async fn update_records<'a, T, I>(
+    pub async fn update_records<'a, F, I>(
         &self,
         table_id: &str,
         records: I,
-    ) -> Result<Vec<Record<T>>>
+    ) -> Result<Vec<Record<F>>>
     where
-        T: Serialize + DeserializeOwned + 'a,
-        I: IntoIterator<Item = &'a ExistingRecord<T>>,
+        F: Serialize + DeserializeOwned + 'a,
+        I: IntoIterator<Item = &'a ExistingRecord<F>>,
     {
-        #[derive(Debug, Clone, Serialize)]
-        struct UpdateRecordsRequest<'a, T> {
-            records: Vec<&'a ExistingRecord<T>>,
+        #[derive(Serialize, Clone, Debug)]
+        struct UpdateRecordsRequest<'a, F> {
+            records: Vec<&'a ExistingRecord<F>>,
         }
 
-        #[derive(Debug, Clone, Deserialize)]
-        struct UpdateRecordsResponse<T> {
-            records: Vec<Record<T>>,
+        #[derive(Deserialize, Clone, Debug)]
+        struct UpdateRecordsResponse<F> {
+            records: Vec<Record<F>>,
         }
 
         let records: Vec<_> = records.into_iter().collect();
@@ -120,7 +135,7 @@ impl AirtableClient {
             };
 
             let response = self
-                .patch::<_, UpdateRecordsResponse<T>>(&format!("/{table_id}"), &body)
+                .patch::<_, UpdateRecordsResponse<F>>(&format!("/{table_id}"), &body)
                 .await
                 .context("Failed to update records")?;
 
@@ -130,23 +145,23 @@ impl AirtableClient {
         Ok(returned_records)
     }
 
-    pub async fn create_records<'a, T, I>(
+    pub async fn create_records<'a, F, I>(
         &self,
         table_id: &str,
         new_records: I,
-    ) -> Result<Vec<Record<T>>>
+    ) -> Result<Vec<Record<F>>>
     where
-        T: Serialize + DeserializeOwned + 'a,
-        I: IntoIterator<Item = &'a T>,
+        F: Serialize + DeserializeOwned + 'a,
+        I: IntoIterator<Item = &'a F>,
     {
-        #[derive(Debug, Clone, Serialize)]
-        struct CreateRecordsRequest<'a, T> {
-            records: Vec<NewRecord<&'a T>>,
+        #[derive(Clone, Serialize, Debug)]
+        struct CreateRecordsRequest<'a, F> {
+            records: Vec<NewRecord<&'a F>>,
         }
 
-        #[derive(Debug, Clone, Deserialize)]
-        struct CreateRecordsResponse<T> {
-            records: Vec<Record<T>>,
+        #[derive(Clone, Deserialize, Debug)]
+        struct CreateRecordsResponse<F> {
+            records: Vec<Record<F>>,
         }
 
         let new_records: Vec<_> = new_records.into_iter().collect();
@@ -160,7 +175,7 @@ impl AirtableClient {
             };
 
             let response = self
-                .post::<_, CreateRecordsResponse<T>>(&format!("/{table_id}"), &body)
+                .post::<_, CreateRecordsResponse<F>>(&format!("/{table_id}"), &body)
                 .await?;
 
             returned_records.extend(response.records);
@@ -169,11 +184,11 @@ impl AirtableClient {
         Ok(returned_records)
     }
 
-    async fn get<T: DeserializeOwned>(
+    async fn get<F: DeserializeOwned>(
         &self,
         endpoint: &str,
         params: Option<&[(&str, &str)]>,
-    ) -> Result<T> {
+    ) -> Result<F> {
         self.rate_limiter.until_ready().await;
 
         let base_url = &format!("{}{}", self.base_url, endpoint);
@@ -235,23 +250,9 @@ impl AirtableClient {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Record<T> {
-    pub id: String,
-    pub created_time: String,
-    pub fields: T,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ExistingRecord<T> {
-    pub id: String,
-    pub fields: T,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct NewRecord<T> {
-    pub fields: T,
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct NewRecord<F> {
+    pub fields: F,
 }
 
 async fn response_result_with_error_body(response: Response) -> Result<Response> {

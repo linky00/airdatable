@@ -26,17 +26,17 @@ pub struct SyncOutput<O: DataObject> {
 }
 
 impl AirtableClient {
-    pub async fn sync_objects_to_airtable<O, A, F>(
+    pub async fn sync_objects_to_airtable<O, F, C>(
         &self,
         objects: &[O],
-        existing_airtable_records: &[Record<A>],
+        existing_airtable_records: &[Record<F>],
         airtable_table_id: &str,
-        convert_to_fields: F,
+        convert_to_fields: C,
     ) -> Result<SyncOutput<O>>
     where
         O: DataObject,
-        A: Serialize + DeserializeOwned + Eq + DataMirror<Object = O>,
-        F: Fn(&O) -> Result<A>,
+        F: Serialize + DeserializeOwned + Eq + DataMirror<Object = O>,
+        C: Fn(&O) -> Result<F>,
     {
         // split update/create
 
