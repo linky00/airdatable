@@ -1,3 +1,4 @@
+use bon::Builder;
 use reqwest::{Method, StatusCode};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;
@@ -47,6 +48,23 @@ pub enum AirtableError {
 
 type Result<T> = std::result::Result<T, AirtableError>;
 
+#[derive(Builder)]
+pub struct GetRecordsParams {
+    filter_by_formula: Option<String>,
+}
+
+impl GetRecordsParams {
+    fn url_params(&self) -> Vec<(&str, &str)> {
+        let mut url_params = vec![];
+
+        if let Some(filter_by_formula) = self.filter_by_formula.as_deref() {
+            url_params.push(("filterByFormula", filter_by_formula));
+        }
+
+        url_params
+    }
+}
+
 #[derive(Clone)]
 pub struct AirtableClient {
     http_client: HttpClient,
@@ -69,7 +87,11 @@ impl AirtableClient {
             .await
     }
 
-    pub async fn get_records<F: DeserializeOwned>(&self, table_id: &str) -> Result<Vec<Record<F>>> {
+    pub async fn get_records<F: DeserializeOwned>(
+        &self,
+        table_id: &str,
+        params: GetRecordsParams,
+    ) -> Result<Vec<Record<F>>> {
         #[derive(Debug, Clone, Deserialize)]
         struct ListRecordsResponse<F> {
             records: Vec<Record<F>>,
@@ -80,10 +102,12 @@ impl AirtableClient {
         let mut offset: Option<String> = None;
 
         loop {
-            let params = if let Some(offset) = offset.as_deref() {
-                vec![("offset", offset)]
-            } else {
-                vec![]
+            let params = {
+                let mut base_params = params.url_params();
+                if let Some(offset) = offset.as_deref() {
+                    base_params.push(("offset", offset));
+                }
+                base_params
             };
 
             let response = self

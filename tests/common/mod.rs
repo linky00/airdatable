@@ -2,7 +2,7 @@
 
 use std::env;
 
-use airdatable::airtable::{AirtableClient, AirtableError, Record};
+use airdatable::airtable::{AirtableClient, AirtableError, GetRecordsParams, Record};
 use anyhow::Result;
 use serde::Deserialize;
 
@@ -24,13 +24,16 @@ impl TestBase {
         })
     }
 
-    pub async fn get_notes(&self) -> Result<Vec<Record<NoteFields>>, AirtableError> {
-        self.client.get_records(&self.notes_table_id).await
+    pub async fn get_notes(
+        &self,
+        params: GetRecordsParams,
+    ) -> Result<Vec<Record<NoteFields>>, AirtableError> {
+        self.client.get_records(&self.notes_table_id, params).await
     }
 }
 
 #[derive(Deserialize, Clone, Debug)]
 pub struct NoteFields {
     #[serde(rename = "Note")]
-    pub note: String,
+    pub note: Option<String>,
 }
