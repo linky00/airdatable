@@ -48,7 +48,7 @@ pub enum AirtableError {
 
 type Result<T> = std::result::Result<T, AirtableError>;
 
-#[derive(Builder)]
+#[derive(Builder, Default)]
 pub struct GetRecordsParams {
     filter_by_formula: Option<String>,
 }
