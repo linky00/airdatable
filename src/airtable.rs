@@ -2,6 +2,7 @@ use bon::Builder;
 use reqwest::{Method, StatusCode};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;
+use url::Url;
 
 use crate::airtable::client::HttpClient;
 
@@ -27,10 +28,11 @@ pub enum AirtableError {
     #[error("can't deserialize successful Airtable response (likely fields object is misformed)")]
     DeserializeSuccessResponse { response: String },
 
-    #[error("error from Airtable api ({status}): {response}")]
+    #[error(r#"error from Airtable api for url "{url}" with status "{status}": {response}"#)]
     Airtable {
         status: StatusCode,
         response: String,
+        url: Url,
     },
 
     #[error("url parsing error: {source}")]

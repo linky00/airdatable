@@ -59,7 +59,7 @@ impl HttpClient {
         let request = {
             let request_without_body = self
                 .client
-                .request(method, url)
+                .request(method, url.clone())
                 .bearer_auth(self.airtable_pat.clone());
 
             if let Some(body) = body {
@@ -82,6 +82,7 @@ impl HttpClient {
             Err(AirtableError::Airtable {
                 status,
                 response: body,
+                url,
             })
         }
     }
