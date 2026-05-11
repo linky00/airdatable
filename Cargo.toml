@@ -3,6 +3,10 @@ name = "airdatable"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = ["sync"]
+sync = ["dep:itertools"]
+
 [dependencies]
 anyhow = "1.0.102"
 governor = "0.10.4"
@@ -13,6 +17,7 @@ serde_json = "1.0.149"
 thiserror = "2.0.18"
 url = "2.5.8"
 
-[features]
-default = ["sync"]
-sync = ["dep:itertools"]
+[dev-dependencies]
+anyhow = "1.0.102"
+dotenvy = "0.15.7"
+tokio = { version = "1.52.3", features = ["rt", "macros"] }
