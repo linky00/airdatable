@@ -1,3 +1,9 @@
+## [Unreleased]
+
+### Changed
+
+- `AirtableClient::sync_output` now takes `impl IntoIterator`s
+
 ## [0.1.4] - 2026-06-19
 
 ### Added

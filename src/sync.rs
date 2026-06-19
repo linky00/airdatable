@@ -70,26 +70,29 @@ impl CreateFieldsError {
 }
 
 impl AirtableClient {
-    pub async fn sync_objects<O, F, C>(
+    pub async fn sync_objects<'a, O, F, C>(
         &self,
-        objects: &[O],
-        existing_airtable_records: &[Record<F>],
+        objects: impl IntoIterator<Item = &'a O>,
+        existing_airtable_records: impl IntoIterator<Item = &'a Record<F>> + Clone,
         airtable_table_id: &str,
         create_fields: C,
     ) -> Result<SyncOutput<O>, SyncObjectsError>
     where
-        O: DataObject,
-        F: Serialize + DeserializeOwned + Eq + DataMirror<Object = O>,
+        O: DataObject + 'a,
+        F: Serialize + DeserializeOwned + Eq + DataMirror<Object = O> + 'a,
         C: Fn(&O) -> Result<F, CreateFieldsError>,
     {
         // split update/create
 
         let (records_to_update, records_to_create): (Vec<_>, Vec<_>) =
-            objects.iter().partition_map(|data_object| {
+            objects.into_iter().partition_map(|data_object| {
                 if let Some(airtable_record) =
-                    existing_airtable_records.iter().find(|airtable_record| {
-                        airtable_record.fields.get_mirror_id() == data_object.get_id()
-                    })
+                    existing_airtable_records
+                        .clone()
+                        .into_iter()
+                        .find(|airtable_record| {
+                            airtable_record.fields.get_mirror_id() == data_object.get_id()
+                        })
                 {
                     Either::Left((data_object, airtable_record))
                 } else {
