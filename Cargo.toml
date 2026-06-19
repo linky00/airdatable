@@ -2,6 +2,11 @@
 name = "airdatable"
 version = "0.1.0"
 edition = "2024"
+description = "wip airtable api w/ data sync utilities"
+license-file = "LICENSE.md"
+documentation = "https://docs.rs/airdatable"
+homepage = "https://github.com/linky00/airdatable"
+repository = "https://github.com/linky00/airdatable"
 
 [features]
 default = ["sync"]
