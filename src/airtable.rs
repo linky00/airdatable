@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;
 use url::Url;
 
-use crate::airtable::client::HttpClient;
+use crate::airtable::http::HttpClient;
 
-mod client;
+mod http;
 
 #[derive(Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
