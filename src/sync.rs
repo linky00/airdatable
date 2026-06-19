@@ -1,10 +1,10 @@
-use std::{collections::HashMap, hash::Hash};
+use std::{collections::HashMap, error::Error, hash::Hash};
 
-use anyhow::Result;
 use itertools::{Either, Itertools};
 use serde::{Serialize, de::DeserializeOwned};
+use thiserror::Error;
 
-use crate::airtable::{AirtableClient, ExistingRecord, Record};
+use crate::airtable::{AirtableClient, AirtableError, ExistingRecord, Record};
 
 pub trait DataObject {
     type Id: PartialEq + Eq + Hash;
@@ -25,18 +25,39 @@ pub struct SyncOutput<O: DataObject> {
     pub skipped_count: usize,
 }
 
+#[derive(Error, Debug)]
+pub enum SyncObjectsError {
+    #[error("airtable error: {source}")]
+    Airtable {
+        #[from]
+        source: AirtableError,
+    },
+    #[error("create fields error: {source}")]
+    CreateFields {
+        #[from]
+        source: CreateFieldsError,
+    },
+}
+
+#[derive(Error, Debug)]
+#[error("{source}")]
+pub struct CreateFieldsError {
+    #[from]
+    source: Box<dyn Error + Send + Sync + 'static>,
+}
+
 impl AirtableClient {
-    pub async fn sync_objects_to_airtable<O, F, C>(
+    pub async fn sync_objects<O, F, C>(
         &self,
         objects: &[O],
         existing_airtable_records: &[Record<F>],
         airtable_table_id: &str,
-        convert_to_fields: C,
-    ) -> Result<SyncOutput<O>>
+        create_fields: C,
+    ) -> Result<SyncOutput<O>, SyncObjectsError>
     where
         O: DataObject,
         F: Serialize + DeserializeOwned + Eq + DataMirror<Object = O>,
-        C: Fn(&O) -> Result<F>,
+        C: Fn(&O) -> Result<F, CreateFieldsError>,
     {
         // split update/create
 
@@ -58,20 +79,22 @@ impl AirtableClient {
         let (updated_airtable_records, skipped_airtable_records): (Vec<_>, Vec<_>) =
             records_to_update
                 .iter()
-                .map(|(data_object, airtable_record)| -> Result<_> {
-                    let updated_airtable_record_result = Ok(ExistingRecord {
-                        id: airtable_record.id.to_string(),
-                        fields: convert_to_fields(data_object)?,
-                    });
+                .map(
+                    |(data_object, airtable_record)| -> Result<_, CreateFieldsError> {
+                        let updated_airtable_record_result = Ok(ExistingRecord {
+                            id: airtable_record.id.to_string(),
+                            fields: create_fields(data_object)?,
+                        });
 
-                    updated_airtable_record_result.map(|updated_airtable_record| {
-                        if updated_airtable_record.fields != airtable_record.fields {
-                            Either::Left(updated_airtable_record)
-                        } else {
-                            Either::Right(updated_airtable_record)
-                        }
-                    })
-                })
+                        updated_airtable_record_result.map(|updated_airtable_record| {
+                            if updated_airtable_record.fields != airtable_record.fields {
+                                Either::Left(updated_airtable_record)
+                            } else {
+                                Either::Right(updated_airtable_record)
+                            }
+                        })
+                    },
+                )
                 .filter_map(Result::ok)
                 .partition_map(|updated_airtable_record| updated_airtable_record);
 
@@ -83,7 +106,7 @@ impl AirtableClient {
         let created_airtable_records = {
             let creating_airtable_records: Vec<_> = records_to_create
                 .iter()
-                .map(|data_object| convert_to_fields(*data_object))
+                .map(|data_object| create_fields(*data_object))
                 .filter_map(Result::ok)
                 .collect();
 

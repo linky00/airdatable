@@ -8,7 +8,6 @@ default = ["sync"]
 sync = ["dep:itertools"]
 
 [dependencies]
-anyhow = "1.0.102"
 bon = "3.9.1"
 governor = "0.10.4"
 itertools = { version = "0.14.0", optional = true }
