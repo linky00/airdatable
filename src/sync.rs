@@ -42,8 +42,18 @@ pub enum SyncObjectsError {
 #[derive(Error, Debug)]
 #[error("{source}")]
 pub struct CreateFieldsError {
-    #[from]
     source: Box<dyn Error + Send + Sync + 'static>,
+}
+
+impl CreateFieldsError {
+    pub fn new<E>(error: E) -> Self
+    where
+        E: Into<Box<dyn Error + Send + Sync + 'static>>,
+    {
+        Self {
+            source: error.into(),
+        }
+    }
 }
 
 impl AirtableClient {
