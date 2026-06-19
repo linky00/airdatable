@@ -1,4 +1,4 @@
-use std::{collections::HashMap, error::Error, hash::Hash};
+use std::{collections::HashMap, error::Error, fmt::Display, hash::Hash};
 
 use itertools::{Either, Itertools};
 use serde::{Serialize, de::DeserializeOwned};
@@ -23,6 +23,19 @@ pub struct SyncOutput<O: DataObject> {
     pub updated_count: usize,
     pub created_count: usize,
     pub skipped_count: usize,
+}
+
+impl<O: DataObject> Display for SyncOutput<O> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} updated + {} created + {} skipped = {} total",
+            self.updated_count,
+            self.created_count,
+            self.skipped_count,
+            self.updated_count + self.created_count + self.skipped_count
+        )
+    }
 }
 
 #[derive(Error, Debug)]
