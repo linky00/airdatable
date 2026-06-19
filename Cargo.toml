@@ -1,9 +1,9 @@
 [package]
 name = "airdatable"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "wip airtable api w/ data sync utilities"
-license-file = "LICENSE.md"
+license = "MIT"
 documentation = "https://docs.rs/airdatable"
 homepage = "https://github.com/linky00/airdatable"
 repository = "https://github.com/linky00/airdatable"
